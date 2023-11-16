@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "canisters": {
+    "backend": {
+      "type": "rust",
+      "package": "backend",
+      "candid": "src/backend/backend.did"
+    }
+  },
+  "output_env_file": ".env"
+}

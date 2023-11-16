@@ -1,0 +1,23 @@
+type CrisisUpdate = record {
+  id : nat64;
+  title : text;
+  description : text;
+  timestamp : nat64;
+  location : text;
+};
+type CrisisUpdatePayload = record {
+  title : text;
+  description : text;
+  location : text;
+};
+type Error = variant { NotFound : record { msg : text } };
+type Result = variant { Ok : CrisisUpdate; Err : Error };
+service : {
+  add_crisis_update : (CrisisUpdatePayload) -> (opt CrisisUpdate);
+  delete_crisis_update : (nat64) -> (Result);
+  get_crisis_update : (nat64) -> (Result) query;
+  get_latest_crisis_update : () -> (opt CrisisUpdate) query;
+  list_all_crisis_updates : () -> (vec CrisisUpdate) query;
+  search_crisis_updates_by_location : (text) -> (vec CrisisUpdate) query;
+  update_crisis_update : (nat64, CrisisUpdatePayload) -> (Result);
+}
