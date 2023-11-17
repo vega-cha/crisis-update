@@ -18,13 +18,12 @@ struct CrisisUpdate {
     timestamp: u64,
 }
 
-// Implementing Storable and BoundedStorable traits for CrisisUpdate
 impl Storable for CrisisUpdate {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
-    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
         Decode!(bytes.as_ref(), Self).unwrap()
     }
 }
@@ -34,25 +33,11 @@ impl BoundedStorable for CrisisUpdate {
     const IS_FIXED_SIZE: bool = false;
 }
 
-// Existing thread-local variables and payload structure
-
 thread_local! {
     static CRISIS_MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> = RefCell::new(
         MemoryManager::init(DefaultMemoryImpl::default())
     );
-
-    static CRISIS_ID_COUNTER: RefCell<IdCell> = RefCell::new(
-        IdCell::init(CRISIS_MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0))), 0)
-            .expect("Cannot create a counter for crisis updates")
-    );
-
-    static CRISIS_STORAGE: RefCell<StableBTreeMap<u64, CrisisUpdate, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            CRISIS_MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1)))
-    ));
 }
-
-// ... (existing thread-local variables and payload structure)
 
 #[derive(candid::CandidType, Serialize, Deserialize, Default)]
 struct CrisisUpdatePayload {
@@ -64,9 +49,9 @@ struct CrisisUpdatePayload {
 #[derive(candid::CandidType, Deserialize, Serialize)]
 enum Error {
     NotFound { msg: String },
+    AccessDenied { msg: String },
 }
 
-// 2.7.1 get_crisis_update Function:
 #[ic_cdk::query]
 fn get_crisis_update(id: u64) -> Result<CrisisUpdate, Error> {
     match _get_crisis_update(&id) {
@@ -77,25 +62,23 @@ fn get_crisis_update(id: u64) -> Result<CrisisUpdate, Error> {
     }
 }
 
-// 2.7.2 _get_crisis_update Function:
 fn _get_crisis_update(id: &u64) -> Option<CrisisUpdate> {
     CRISIS_STORAGE.with(|s| s.borrow().get(id))
 }
 
-// Helper method to perform insert for CrisisUpdate
 fn do_insert_crisis_update(update: &CrisisUpdate) {
     CRISIS_STORAGE.with(|service| service.borrow_mut().insert(update.id, update.clone()));
 }
 
-// 2.7.3 add_crisis_update Function:
 #[ic_cdk::update]
-fn add_crisis_update(update: CrisisUpdatePayload) -> Option<CrisisUpdate> {
+fn add_crisis_update(update: CrisisUpdatePayload) -> Result<CrisisUpdate, Error> {
     let id = CRISIS_ID_COUNTER
         .with(|counter| {
             let current_value = *counter.borrow().get();
             counter.borrow_mut().set(current_value + 1)
         })
         .expect("cannot increment id counter for crisis updates");
+
     let crisis_update = CrisisUpdate {
         id,
         title: update.title,
@@ -103,13 +86,19 @@ fn add_crisis_update(update: CrisisUpdatePayload) -> Option<CrisisUpdate> {
         location: update.location,
         timestamp: time(),
     };
+
     do_insert_crisis_update(&crisis_update);
-    Some(crisis_update)
+    Ok(crisis_update)
 }
 
-// 2.7.4 update_crisis_update Function:
 #[ic_cdk::update]
 fn update_crisis_update(id: u64, payload: CrisisUpdatePayload) -> Result<CrisisUpdate, Error> {
+    if !is_authorized() {
+        return Err(Error::AccessDenied {
+            msg: "Access denied. User lacks authorization.".to_string(),
+        });
+    }
+
     match CRISIS_STORAGE.with(|service| service.borrow().get(&id)) {
         Some(mut update) => {
             update.title = payload.title;
@@ -128,9 +117,14 @@ fn update_crisis_update(id: u64, payload: CrisisUpdatePayload) -> Result<CrisisU
     }
 }
 
-// 2.7.5 delete_crisis_update Function:
 #[ic_cdk::update]
 fn delete_crisis_update(id: u64) -> Result<CrisisUpdate, Error> {
+    if !is_authorized() {
+        return Err(Error::AccessDenied {
+            msg: "Access denied. User lacks authorization.".to_string(),
+        });
+    }
+
     match CRISIS_STORAGE.with(|service| service.borrow_mut().remove(&id)) {
         Some(update) => Ok(update),
         None => Err(Error::NotFound {
@@ -142,7 +136,6 @@ fn delete_crisis_update(id: u64) -> Result<CrisisUpdate, Error> {
     }
 }
 
-// 2.7.7 list_all_crisis_updates Function:
 #[ic_cdk::query]
 fn list_all_crisis_updates() -> Vec<CrisisUpdate> {
     CRISIS_STORAGE.with(|service| {
@@ -154,7 +147,6 @@ fn list_all_crisis_updates() -> Vec<CrisisUpdate> {
     })
 }
 
-// 2.7.8 get_latest_crisis_update Function:
 #[ic_cdk::query]
 fn get_latest_crisis_update() -> Option<CrisisUpdate> {
     CRISIS_STORAGE
@@ -164,7 +156,6 @@ fn get_latest_crisis_update() -> Option<CrisisUpdate> {
         })
 }
 
-// 2.7.9 search_crisis_updates_by_location Function:
 #[ic_cdk::query]
 fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
     CRISIS_STORAGE
@@ -180,27 +171,10 @@ fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
         })
 }
 
-// 2.7.10 mark_crisis_update_as_resolved Function:
-// #[ic_cdk::update]
-// fn mark_crisis_update_as_resolved(id: u64) -> Result<(), Error> {
-//     CRISIS_STORAGE
-//         .with(|service| {
-//             let map = service.borrow();
-//             match map.iter().find(|(key, _)| **key == id) {
-//                 Some((_, update)) => {
-//                     // This line will not work because `update` is not mutable
-//                     // update.timestamp = time(); // Update timestamp to mark as resolved
-//                     Ok(())
-//                 },
-//                 None => Err(Error::NotFound {
-//                     msg: format!(
-//                         "Couldn't mark a crisis update with id={} as resolved. Update not found.",
-//                         id
-//                     ),
-//                 }),
-//             }
-//         })
-// }
+fn is_authorized() -> bool {
+    // Implement your authorization logic here
+    // For example, check if the user has the necessary roles or permissions
+    true
+}
 
-// To generate the Candid interface definitions for our canister
 ic_cdk::export_candid!();
