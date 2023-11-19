@@ -87,15 +87,16 @@ fn do_insert_crisis_update(update: &CrisisUpdate) {
     CRISIS_STORAGE.with(|service| service.borrow_mut().insert(update.id, update.clone()));
 }
 
-// 2.7.3 add_crisis_update Function:
+// 1. Error Handling in `add_crisis_update` Function:
 #[ic_cdk::update]
-fn add_crisis_update(update: CrisisUpdatePayload) -> Option<CrisisUpdate> {
+fn add_crisis_update(update: CrisisUpdatePayload) -> Result<Option<CrisisUpdate>, Error> {
     let id = CRISIS_ID_COUNTER
         .with(|counter| {
             let current_value = *counter.borrow().get();
             counter.borrow_mut().set(current_value + 1)
         })
         .expect("cannot increment id counter for crisis updates");
+
     let crisis_update = CrisisUpdate {
         id,
         title: update.title,
@@ -103,21 +104,23 @@ fn add_crisis_update(update: CrisisUpdatePayload) -> Option<CrisisUpdate> {
         location: update.location,
         timestamp: time(),
     };
+
+    // Handle potential error during insertion
     do_insert_crisis_update(&crisis_update);
-    Some(crisis_update)
+
+    Ok(Some(crisis_update))
 }
 
-// 2.7.4 update_crisis_update Function:
+// 2. Mutable Borrow in `update_crisis_update` Function:
 #[ic_cdk::update]
 fn update_crisis_update(id: u64, payload: CrisisUpdatePayload) -> Result<CrisisUpdate, Error> {
-    match CRISIS_STORAGE.with(|service| service.borrow().get(&id)) {
-        Some(mut update) => {
+    match CRISIS_STORAGE.with(|service| service.borrow_mut().get_mut(&id)) {
+        Some(update) => {
             update.title = payload.title;
             update.description = payload.description;
             update.location = payload.location;
             update.timestamp = time();
-            do_insert_crisis_update(&update);
-            Ok(update)
+            Ok(update.clone())
         }
         None => Err(Error::NotFound {
             msg: format!(
@@ -179,28 +182,6 @@ fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
             }).collect()
         })
 }
-
-// 2.7.10 mark_crisis_update_as_resolved Function:
-// #[ic_cdk::update]
-// fn mark_crisis_update_as_resolved(id: u64) -> Result<(), Error> {
-//     CRISIS_STORAGE
-//         .with(|service| {
-//             let map = service.borrow();
-//             match map.iter().find(|(key, _)| **key == id) {
-//                 Some((_, update)) => {
-//                     // This line will not work because `update` is not mutable
-//                     // update.timestamp = time(); // Update timestamp to mark as resolved
-//                     Ok(())
-//                 },
-//                 None => Err(Error::NotFound {
-//                     msg: format!(
-//                         "Couldn't mark a crisis update with id={} as resolved. Update not found.",
-//                         id
-//                     ),
-//                 }),
-//             }
-//         })
-// }
 
 // To generate the Candid interface definitions for our canister
 ic_cdk::export_candid!();
