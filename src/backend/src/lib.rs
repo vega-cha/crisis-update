@@ -1,7 +1,8 @@
 #[macro_use]
 extern crate serde;
 use candid::{Decode, Encode};
-use ic_cdk::api::time;
+use validator::Validate;
+use ic_cdk::api::{time, caller};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{BoundedStorable, Cell, DefaultMemoryImpl, StableBTreeMap, Storable};
 use std::{borrow::Cow, cell::RefCell};
@@ -13,9 +14,11 @@ type IdCell = Cell<u64, Memory>;
 struct CrisisUpdate {
     id: u64,
     title: String,
+    author: String,
     description: String,
     location: String,
-    timestamp: u64,
+    timestamp: Option<u64>,
+    created_at: u64
 }
 
 // Implementing Storable and BoundedStorable traits for CrisisUpdate
@@ -54,16 +57,21 @@ thread_local! {
 
 // ... (existing thread-local variables and payload structure)
 
-#[derive(candid::CandidType, Serialize, Deserialize, Default)]
+#[derive(candid::CandidType, Serialize, Deserialize, Default, Validate)]
 struct CrisisUpdatePayload {
+    #[validate(length(min = 1))]
     title: String,
+    #[validate(length(min = 10))]
     description: String,
+    #[validate(length(min = 2))]
     location: String,
 }
 
 #[derive(candid::CandidType, Deserialize, Serialize)]
 enum Error {
     NotFound { msg: String },
+    InputValidationFailed {msg: String},
+    AuthenticationFailed {msg: String}
 }
 
 // 2.7.1 get_crisis_update Function:
@@ -89,7 +97,13 @@ fn do_insert_crisis_update(update: &CrisisUpdate) {
 
 // 2.7.3 add_crisis_update Function:
 #[ic_cdk::update]
-fn add_crisis_update(update: CrisisUpdatePayload) -> Option<CrisisUpdate> {
+fn add_crisis_update(update: CrisisUpdatePayload) -> Result<CrisisUpdate, Error> {
+    // Validates payload
+    let check_payload = _check_input(&update);
+    // Returns an error if validations failed
+    if check_payload.is_err(){
+        return Err(check_payload.err().unwrap());
+    }
     let id = CRISIS_ID_COUNTER
         .with(|counter| {
             let current_value = *counter.borrow().get();
@@ -99,23 +113,36 @@ fn add_crisis_update(update: CrisisUpdatePayload) -> Option<CrisisUpdate> {
     let crisis_update = CrisisUpdate {
         id,
         title: update.title,
+        author: caller().to_string(),
         description: update.description,
         location: update.location,
-        timestamp: time(),
+        timestamp: None,
+        created_at: time()
     };
     do_insert_crisis_update(&crisis_update);
-    Some(crisis_update)
+    Ok(crisis_update)
 }
 
 // 2.7.4 update_crisis_update Function:
 #[ic_cdk::update]
 fn update_crisis_update(id: u64, payload: CrisisUpdatePayload) -> Result<CrisisUpdate, Error> {
     match CRISIS_STORAGE.with(|service| service.borrow().get(&id)) {
-        Some(mut update) => {
+        Some(mut update) => { 
+            // Validates whether caller is the author of the task
+            let check_if_author = _check_if_author(&update);
+            if check_if_author.is_err() {
+                return Err(check_if_author.err().unwrap())
+            }
+            // Validates payload
+            let check_payload = _check_input(&payload);
+            // Returns an error if validations failed
+            if check_payload.is_err(){
+                return Err(check_payload.err().unwrap());
+            }            
             update.title = payload.title;
             update.description = payload.description;
             update.location = payload.location;
-            update.timestamp = time();
+            update.timestamp = Some(time());
             do_insert_crisis_update(&update);
             Ok(update)
         }
@@ -131,6 +158,13 @@ fn update_crisis_update(id: u64, payload: CrisisUpdatePayload) -> Result<CrisisU
 // 2.7.5 delete_crisis_update Function:
 #[ic_cdk::update]
 fn delete_crisis_update(id: u64) -> Result<CrisisUpdate, Error> {
+
+    let crisis_update = _get_crisis_update(&id).expect(&format!("couldn't delete a crisis_update with id={}. crisis_update not found.", id));
+    // Validates whether caller is the author of the task
+    let check_if_author = _check_if_author(&crisis_update);
+    if check_if_author.is_err() {
+        return Err(check_if_author.err().unwrap())
+    }
     match CRISIS_STORAGE.with(|service| service.borrow_mut().remove(&id)) {
         Some(update) => Ok(update),
         None => Err(Error::NotFound {
@@ -144,30 +178,40 @@ fn delete_crisis_update(id: u64) -> Result<CrisisUpdate, Error> {
 
 // 2.7.7 list_all_crisis_updates Function:
 #[ic_cdk::query]
-fn list_all_crisis_updates() -> Vec<CrisisUpdate> {
-    CRISIS_STORAGE.with(|service| {
+fn list_all_crisis_updates() -> Result<Vec<CrisisUpdate>, Error> {
+    if CRISIS_STORAGE.with(|service| service.borrow().is_empty()) {
+        return Err(Error::NotFound { msg: format!("There are currently no crisis update reported in the canister") })
+    }
+
+    Ok(    CRISIS_STORAGE.with(|service| {
         service
             .borrow()
             .iter()
             .map(|(_, item)| item.clone())
             .collect()
-    })
+    }))
 }
 
 // 2.7.8 get_latest_crisis_update Function:
 #[ic_cdk::query]
-fn get_latest_crisis_update() -> Option<CrisisUpdate> {
-    CRISIS_STORAGE
-        .with(|service| {
-            let map = service.borrow();
-            map.iter().max_by_key(|(_, update)| update.timestamp).map(|(_, update)| update.clone())
-        })
+fn get_latest_crisis_update() -> Result<CrisisUpdate, Error> {
+    let crisis_update = CRISIS_STORAGE
+        .with(|service| service.borrow().last_key_value());
+
+    if crisis_update.is_none() {
+        return Err(Error::NotFound { msg: format!("There are currently no crisis update reported in the canister") })
+    }else{
+        Ok(crisis_update.unwrap().1)
+    }
 }
 
 // 2.7.9 search_crisis_updates_by_location Function:
 #[ic_cdk::query]
-fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
-    CRISIS_STORAGE
+fn search_crisis_updates_by_location(location: String) -> Result<Vec<CrisisUpdate>, Error> {
+    if CRISIS_STORAGE.with(|service| service.borrow().is_empty()) {
+        return Err(Error::NotFound { msg: format!("There are currently no crisis update reported in the canister") })
+    }
+    let filtered_crisis_updates: Vec<CrisisUpdate> = CRISIS_STORAGE
         .with(|service| {
             let map = service.borrow();
             map.iter().filter_map(|(_, update)| {
@@ -177,7 +221,11 @@ fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
                     None
                 }
             }).collect()
-        })
+        });
+    if filtered_crisis_updates.len() == 0 {
+        return Err(Error::NotFound { msg: format!("There are currently no crisis update reported in the location ={}", location) })
+    }
+    Ok(filtered_crisis_updates)
 }
 
 // 2.7.10 mark_crisis_update_as_resolved Function:
@@ -201,6 +249,25 @@ fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
 //             }
 //         })
 // }
+
+// Helper function to check the input data of the payload
+fn _check_input(payload: &CrisisUpdatePayload) -> Result<(), Error> {
+    let check_payload = payload.validate();
+    if check_payload.is_err() {
+        return Err(Error:: InputValidationFailed{ msg: check_payload.err().unwrap().to_string()})
+    }else{
+        Ok(())
+    }
+}
+
+// Helper function to check whether the caller is the author of a crisis_update
+fn _check_if_author(crisis_update: &CrisisUpdate) -> Result<(), Error> {
+    if crisis_update.author.to_string() != caller().to_string(){
+        return Err(Error:: AuthenticationFailed{ msg: format!("Caller={} isn't the author of the crisis_update with id={}", caller(), crisis_update.id) })  
+    }else{
+        Ok(())
+    }
+}
 
 // To generate the Candid interface definitions for our canister
 ic_cdk::export_candid!();
