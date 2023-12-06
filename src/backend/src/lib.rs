@@ -270,5 +270,39 @@ fn get_crisis_updates_by_id_range(start_id: u64, end_id: u64) -> Vec<CrisisUpdat
     })
 }
 
+// 2.7.20 get_crisis_updates_by_title Function:
+#[ic_cdk::query]
+fn get_crisis_updates_by_title(title: String) -> Vec<CrisisUpdate> {
+    CRISIS_STORAGE.with(|service| {
+        let map = service.borrow();
+        map.iter()
+            .filter_map(|(_, update)| {
+                if update.title.contains(&title) {
+                    Some(update.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
+// 2.7.21 get_crisis_updates_by_description Function:
+#[ic_cdk::query]
+fn get_crisis_updates_by_description(description: String) -> Vec<CrisisUpdate> {
+    CRISIS_STORAGE.with(|service| {
+        let map = service.borrow();
+        map.iter()
+            .filter_map(|(_, update)| {
+                if update.description.contains(&description) {
+                    Some(update.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
 // To generate the Candid interface definitions for our canister
 ic_cdk::export_candid!();
