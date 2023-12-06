@@ -202,5 +202,73 @@ fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
 //         })
 // }
 
+// 2.7.10 get_crisis_updates_in_range Function:
+#[ic_cdk::query]
+fn get_crisis_updates_in_range(start_timestamp: u64, end_timestamp: u64) -> Vec<CrisisUpdate> {
+    CRISIS_STORAGE.with(|service| {
+        let map = service.borrow();
+        map.iter()
+            .filter_map(|(_, update)| {
+                if update.timestamp >= start_timestamp && update.timestamp <= end_timestamp {
+                    Some(update.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
+// 2.7.11 get_crisis_updates_before Function:
+#[ic_cdk::query]
+fn get_crisis_updates_before(end_timestamp: u64) -> Vec<CrisisUpdate> {
+    CRISIS_STORAGE.with(|service| {
+        let map = service.borrow();
+        map.iter()
+            .filter_map(|(_, update)| {
+                if update.timestamp < end_timestamp {
+                    Some(update.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
+// 2.7.12 get_crisis_updates_after Function:
+#[ic_cdk::query]
+fn get_crisis_updates_after(start_timestamp: u64) -> Vec<CrisisUpdate> {
+    CRISIS_STORAGE.with(|service| {
+        let map = service.borrow();
+        map.iter()
+            .filter_map(|(_, update)| {
+                if update.timestamp > start_timestamp {
+                    Some(update.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
+// 2.7.16 get_crisis_updates_by_id_range Function:
+#[ic_cdk::query]
+fn get_crisis_updates_by_id_range(start_id: u64, end_id: u64) -> Vec<CrisisUpdate> {
+    CRISIS_STORAGE.with(|service| {
+        let map = service.borrow();
+        map.iter()
+            .filter_map(|(_, update)| {
+                if update.id >= start_id && update.id <= end_id {
+                    Some(update.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
 // To generate the Candid interface definitions for our canister
 ic_cdk::export_candid!();
