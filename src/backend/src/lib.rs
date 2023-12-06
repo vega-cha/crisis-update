@@ -180,28 +180,6 @@ fn search_crisis_updates_by_location(location: String) -> Vec<CrisisUpdate> {
         })
 }
 
-// 2.7.10 mark_crisis_update_as_resolved Function:
-// #[ic_cdk::update]
-// fn mark_crisis_update_as_resolved(id: u64) -> Result<(), Error> {
-//     CRISIS_STORAGE
-//         .with(|service| {
-//             let map = service.borrow();
-//             match map.iter().find(|(key, _)| **key == id) {
-//                 Some((_, update)) => {
-//                     // This line will not work because `update` is not mutable
-//                     // update.timestamp = time(); // Update timestamp to mark as resolved
-//                     Ok(())
-//                 },
-//                 None => Err(Error::NotFound {
-//                     msg: format!(
-//                         "Couldn't mark a crisis update with id={} as resolved. Update not found.",
-//                         id
-//                     ),
-//                 }),
-//             }
-//         })
-// }
-
 // 2.7.10 get_crisis_updates_in_range Function:
 #[ic_cdk::query]
 fn get_crisis_updates_in_range(start_timestamp: u64, end_timestamp: u64) -> Vec<CrisisUpdate> {
